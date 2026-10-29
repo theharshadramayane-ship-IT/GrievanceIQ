@@ -1,51 +1,63 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [complaints, setComplaints] = useState([]); // Ab data database se aayega
+  const [loading, setLoading] = useState(false);
   
-  const [complaints, setComplaints] = useState([
-    { id: 'GRV-101', title: 'Road pothole in Sector 4', status: 'In Progress', priority: 'High', sla: '2h 30m', dept: 'Public Works' },
-    { id: 'GRV-102', title: 'Water leakage near main market', status: 'Pending', priority: 'Medium', sla: '5h 15m', dept: 'Water Supply' },
-    { id: 'GRV-103', title: 'Street light not working', status: 'Resolved', priority: 'Low', sla: 'Completed', dept: 'Electricity' },
-  ]);
-
   const [newTitle, setNewTitle] = useState('');
   const [newDesc, setNewDesc] = useState('');
   
   const [trackId, setTrackId] = useState('');
   const [trackedComplaint, setTrackedComplaint] = useState(null);
 
-  // Form Submit (NLP Simulation ke sath)
-  const handleSubmit = (e) => {
+  // 1. Backend se saari complaints fetch karna (GET API)
+  const fetchComplaints = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch('http://localhost:8000/api/complaints');
+      const data = await response.json();
+      setComplaints(data);
+    } catch (error) {
+      console.error("Error fetching data:", error);
+    }
+    setLoading(false);
+  };
+
+  // Jab page pehli baar load ho, toh data le aao
+  useEffect(() => {
+    fetchComplaints();
+  }, []);
+
+  // 2. Nayi complaint submit karna (POST API)
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!newTitle) return alert("Please enter a title");
 
-    // Chhota sa NLP logic (Keyword ke basis par department assign karega)
-    let assignedDept = "General Admin";
-    const text = (newTitle + " " + newDesc).toLowerCase();
-    if (text.includes("water") || text.includes("leak")) assignedDept = "Water Supply";
-    else if (text.includes("road") || text.includes("pothole")) assignedDept = "Public Works";
-    else if (text.includes("light") || text.includes("electric")) assignedDept = "Electricity";
-
-    const newComplaint = {
-      id: `GRV-${Math.floor(100 + Math.random() * 900)}`,
-      title: newTitle,
-      status: 'Pending',
-      priority: 'High',
-      sla: '24h 00m',
-      dept: assignedDept
-    };
-
-    setComplaints([newComplaint, ...complaints]);
-    setNewTitle('');
-    setNewDesc('');
-    setActiveTab('dashboard');
-    alert(`Complaint Submitted! Auto-routed to: ${assignedDept}`);
+    try {
+      const response = await fetch('http://localhost:8000/api/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: newTitle, description: newDesc })
+      });
+      
+      const result = await response.json();
+      alert(`Complaint Submitted! Auto-routed to: ${result.data.department}`);
+      
+      setNewTitle('');
+      setNewDesc('');
+      setActiveTab('dashboard');
+      fetchComplaints(); // Naya data wapas fetch karo
+    } catch (error) {
+      console.error("Error submitting:", error);
+      alert("Failed to submit complaint");
+    }
   };
 
-  // Track Function
+  // 3. Track function
   const handleTrack = () => {
-    const found = complaints.find(c => c.id.toLowerCase() === trackId.toLowerCase());
+    // Database se aayi list mein ID dhoondo
+    const found = complaints.find(c => c.id.toString() === trackId);
     if (found) {
       setTrackedComplaint(found);
     } else {
@@ -54,21 +66,20 @@ export default function App() {
     }
   };
 
-  // Officer Action: Resolve Complaint
-  const resolveComplaint = (id) => {
-    const updated = complaints.map(c => {
-      if (c.id === id) {
-        return { ...c, status: 'Resolved', sla: 'Completed' };
+  // 4. Officer Action: Resolve Complaint (POST API)
+  const resolveComplaint = async (id) => {
+    try {
+      await fetch(`http://localhost:8000/api/resolve/${id}`, { method: 'POST' });
+      alert(`Complaint #${id} marked as Resolved!`);
+      
+      fetchComplaints(); // Table refresh karo
+      
+      if (trackedComplaint && trackedComplaint.id === id) {
+        setTrackedComplaint({ ...trackedComplaint, status: 'Resolved', sla_time: 'Completed' });
       }
-      return c;
-    });
-    setComplaints(updated);
-    
-    // Agar track kar rahe hain toh wahan bhi update ho jaye
-    if (trackedComplaint && trackedComplaint.id === id) {
-      setTrackedComplaint({ ...trackedComplaint, status: 'Resolved', sla: 'Completed' });
+    } catch (error) {
+      console.error("Error resolving:", error);
     }
-    alert(`Complaint ${id} marked as Resolved!`);
   };
 
   return (
@@ -89,7 +100,7 @@ export default function App() {
         
         <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px', backgroundColor: 'white', padding: '20px', borderRadius: '12px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
           <h2 style={{ fontSize: '20px', color: '#0f172a' }}>
-            {activeTab === 'dashboard' && 'Officer Dashboard'}
+            {activeTab === 'dashboard' && 'Officer Dashboard (Live DB)'}
             {activeTab === 'submit' && 'Submit a New Complaint'}
             {activeTab === 'track' && 'Track Complaint Status'}
           </h2>
@@ -102,63 +113,67 @@ export default function App() {
         {/* DASHBOARD TAB */}
         {activeTab === 'dashboard' && (
           <div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px', marginBottom: '30px' }}>
-              <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '12px' }}>
-                <h3 style={{ color: '#64748b', fontSize: '14px', marginBottom: '10px' }}>Total Complaints</h3>
-                <p style={{ fontSize: '28px', fontWeight: 'bold' }}>{complaints.length}</p>
-              </div>
-              <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '12px' }}>
-                <h3 style={{ color: '#64748b', fontSize: '14px', marginBottom: '10px' }}>Pending Actions</h3>
-                <p style={{ fontSize: '28px', fontWeight: 'bold', color: '#ef4444' }}>
-                  {complaints.filter(c => c.status !== 'Resolved').length}
-                </p>
-              </div>
-              <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '12px' }}>
-                <h3 style={{ color: '#64748b', fontSize: '14px', marginBottom: '10px' }}>Resolved</h3>
-                <p style={{ fontSize: '28px', fontWeight: 'bold', color: '#22c55e' }}>
-                  {complaints.filter(c => c.status === 'Resolved').length}
-                </p>
-              </div>
-            </div>
+            {loading ? <p>Loading data from cloud...</p> : (
+              <>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px', marginBottom: '30px' }}>
+                  <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '12px' }}>
+                    <h3 style={{ color: '#64748b', fontSize: '14px', marginBottom: '10px' }}>Total Complaints</h3>
+                    <p style={{ fontSize: '28px', fontWeight: 'bold' }}>{complaints.length}</p>
+                  </div>
+                  <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '12px' }}>
+                    <h3 style={{ color: '#64748b', fontSize: '14px', marginBottom: '10px' }}>Pending Actions</h3>
+                    <p style={{ fontSize: '28px', fontWeight: 'bold', color: '#ef4444' }}>
+                      {complaints.filter(c => c.status !== 'Resolved').length}
+                    </p>
+                  </div>
+                  <div style={{ backgroundColor: 'white', padding: '20px', borderRadius: '12px' }}>
+                    <h3 style={{ color: '#64748b', fontSize: '14px', marginBottom: '10px' }}>Resolved</h3>
+                    <p style={{ fontSize: '28px', fontWeight: 'bold', color: '#22c55e' }}>
+                      {complaints.filter(c => c.status === 'Resolved').length}
+                    </p>
+                  </div>
+                </div>
 
-            <div style={{ backgroundColor: 'white', borderRadius: '12px', padding: '20px' }}>
-              <h3 style={{ marginBottom: '20px' }}>Recent Complaints & Actions</h3>
-              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid #e2e8f0', color: '#64748b' }}>
-                    <th style={{ padding: '12px' }}>ID</th>
-                    <th style={{ padding: '12px' }}>Title & Dept</th>
-                    <th style={{ padding: '12px' }}>Status</th>
-                    <th style={{ padding: '12px' }}>SLA Timer</th>
-                    <th style={{ padding: '12px' }}>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {complaints.map((c) => (
-                    <tr key={c.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                      <td style={{ padding: '12px', fontWeight: '500' }}>{c.id}</td>
-                      <td style={{ padding: '12px' }}>
-                        <div style={{ fontWeight: '500' }}>{c.title}</div>
-                        <div style={{ fontSize: '12px', color: '#64748b' }}>Dept: {c.dept}</div>
-                      </td>
-                      <td style={{ padding: '12px' }}>
-                        <span style={{ padding: '4px 8px', borderRadius: '20px', fontSize: '12px', backgroundColor: c.status === 'Resolved' ? '#dcfce7' : c.status === 'In Progress' ? '#fef08a' : '#fee2e2', color: c.status === 'Resolved' ? '#166534' : c.status === 'In Progress' ? '#854d0e' : '#991b1b' }}>
-                          {c.status}
-                        </span>
-                      </td>
-                      <td style={{ padding: '12px', fontWeight: 'bold', color: c.sla === 'Completed' ? '#22c55e' : '#ef4444' }}>{c.sla}</td>
-                      <td style={{ padding: '12px' }}>
-                        {c.status !== 'Resolved' ? (
-                          <button onClick={() => resolveComplaint(c.id)} style={{ backgroundColor: '#22c55e', color: 'white', border: 'none', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>Mark Resolved</button>
-                        ) : (
-                          <span style={{ color: '#64748b', fontSize: '12px' }}>Done ✅</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                <div style={{ backgroundColor: 'white', borderRadius: '12px', padding: '20px' }}>
+                  <h3 style={{ marginBottom: '20px' }}>Recent Complaints (From Cloud DB)</h3>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid #e2e8f0', color: '#64748b' }}>
+                        <th style={{ padding: '12px' }}>ID</th>
+                        <th style={{ padding: '12px' }}>Title & Dept</th>
+                        <th style={{ padding: '12px' }}>Status</th>
+                        <th style={{ padding: '12px' }}>SLA Timer</th>
+                        <th style={{ padding: '12px' }}>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {complaints.map((c) => (
+                        <tr key={c.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                          <td style={{ padding: '12px', fontWeight: '500' }}>#{c.id}</td>
+                          <td style={{ padding: '12px' }}>
+                            <div style={{ fontWeight: '500' }}>{c.title}</div>
+                            <div style={{ fontSize: '12px', color: '#64748b' }}>Dept: {c.department}</div>
+                          </td>
+                          <td style={{ padding: '12px' }}>
+                            <span style={{ padding: '4px 8px', borderRadius: '20px', fontSize: '12px', backgroundColor: c.status === 'Resolved' ? '#dcfce7' : '#fee2e2', color: c.status === 'Resolved' ? '#166534' : '#991b1b' }}>
+                              {c.status}
+                            </span>
+                          </td>
+                          <td style={{ padding: '12px', fontWeight: 'bold', color: c.sla_time === 'Completed' ? '#22c55e' : '#ef4444' }}>{c.sla_time}</td>
+                          <td style={{ padding: '12px' }}>
+                            {c.status !== 'Resolved' ? (
+                              <button onClick={() => resolveComplaint(c.id)} style={{ backgroundColor: '#22c55e', color: 'white', border: 'none', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>Mark Resolved</button>
+                            ) : (
+                              <span style={{ color: '#64748b', fontSize: '12px' }}>Done ✅</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
           </div>
         )}
 
@@ -183,19 +198,18 @@ export default function App() {
         {activeTab === 'track' && (
           <div style={{ backgroundColor: 'white', padding: '30px', borderRadius: '12px' }}>
              <div style={{ display: 'flex', gap: '10px', marginBottom: '30px' }}>
-              <input type="text" value={trackId} onChange={(e) => setTrackId(e.target.value)} placeholder="Enter ID (e.g. GRV-101)" style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1' }} />
+              <input type="text" value={trackId} onChange={(e) => setTrackId(e.target.value)} placeholder="Enter ID (e.g. 1)" style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1' }} />
               <button onClick={handleTrack} style={{ backgroundColor: '#1e293b', color: 'white', padding: '10px 20px', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}>Track</button>
             </div>
 
             {trackedComplaint && (
               <div style={{ border: '1px solid #e2e8f0', padding: '20px', borderRadius: '12px' }}>
                 
-                {/* NLP Box */}
                 <div style={{ backgroundColor: '#f0f9ff', padding: '15px', borderRadius: '8px', marginBottom: '20px', borderLeft: '4px solid #38bdf8' }}>
-                  <p style={{ fontSize: '14px', color: '#0369a1' }}><strong>AI NLP Analysis:</strong> Routed to <strong>{trackedComplaint.dept}</strong> department.</p>
+                  <p style={{ fontSize: '14px', color: '#0369a1' }}><strong>AI NLP Analysis:</strong> Routed to <strong>{trackedComplaint.department}</strong> department.</p>
                 </div>
 
-                <h3 style={{ marginBottom: '10px' }}>{trackedComplaint.id}: <span style={{color: '#0f172a'}}>{trackedComplaint.title}</span></h3>
+                <h3 style={{ marginBottom: '10px' }}>Complaint #{trackedComplaint.id}: <span style={{color: '#0f172a'}}>{trackedComplaint.title}</span></h3>
                 <p style={{ fontSize: '14px', color: '#64748b', marginBottom: '30px' }}>Current Status: <strong>{trackedComplaint.status}</strong></p>
                 
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'relative' }}>
